@@ -124,7 +124,7 @@ Chunks, their metadata, and their embeddings live in the same database as everyt
 
 Lesson plan generation targets ≤ 25s at p95. A synchronous FastAPI request holding a worker for 25 seconds collapses at roughly 30 concurrent teachers.
 
-Jobs go in a Postgres-backed queue table consumed with `SELECT … FOR UPDATE SKIP LOCKED`. Output streams to the client over SSE as it is produced.
+Jobs go in a Postgres-backed queue table consumed with `SELECT … FOR UPDATE SKIP LOCKED`. Output streams to the client over SSE as it is produced; the Streamlit frontend consumes it with a `requests` streaming call fed straight into `st.write_stream`, so no custom SSE client code is needed on the frontend.
 
 *Rejected:* Redis + RQ. It is a perfectly good answer and marginally less code, but it adds a second piece of infrastructure to serve one table's worth of state. Decision 7 says one datastore; this follows from it. *If we run short on time, RQ is the documented fallback.*
 
@@ -169,8 +169,7 @@ Named so that "you didn't build X" has an answer:
 
 | Layer | Choice | Reasoning |
 |---|---|---|
-| Frontend | React + Vite + TypeScript | Fast dev loop; SSE streaming is straightforward; typed API client catches contract drift |
-| Styling | Tailwind CSS | Utility-first, no design system to maintain under time pressure |
+| Frontend | Streamlit (Python) | Same language as the backend, no separate build/JS toolchain to maintain under time pressure; `st.write_stream` consumes the backend's token stream natively |
 | Backend | FastAPI (Python) | Native async for streaming and provider I/O; Pydantic gives request *and* LLM-output schema validation from one type definition |
 | Database | PostgreSQL 16 | Relational integrity for the objective↔question alignment that the product depends on |
 | Vector search | pgvector extension | Decision 7 — one store, cascading deletes, no orphaned embeddings |
@@ -179,6 +178,8 @@ Named so that "you didn't build X" has an answer:
 | Export | ReportLab / python-docx | Font embedding controllable — required for Devanagari and other non-Latin scripts |
 | LLM | Provider-abstracted | Decision 9 — model ID recorded per generation, provider swappable by config |
 | Auth | JWT with tenant claim | Tenant scope enforced server-side on every query |
+
+*Rejected: React + Vite for the frontend.* It's the better choice for a polished, bespoke multi-page product, but it means maintaining two toolchains (Python backend, JS frontend) on a one-day clock. Streamlit gets a reviewable, working UI live fastest, at the cost of a more generic look — an acceptable trade for a hackathon demo, not necessarily for Phase 2.
 
 ---
 
@@ -214,12 +215,13 @@ Every tenant-owned table carries `tenant_id`. All queries are tenant-scoped in t
 ```
 mylesson-ai/
 ├── frontend/
-│   ├── src/
-│   │   ├── features/        context · upload · generate · review · library
-│   │   ├── components/
-│   │   ├── api/             typed client, SSE handling
-│   │   └── App.tsx
-│   └── vite.config.ts
+│   ├── app.py                entry point, page nav
+│   ├── pages/                context · upload · generate · review · library (Streamlit multipage)
+│   ├── components/           shared widgets — artifact viewer, citation renderer, approval gate
+│   ├── api_client.py         thin wrapper over backend HTTP + streaming
+│   ├── .streamlit/
+│   │   └── config.toml       theme
+│   └── requirements.txt
 ├── backend/
 │   ├── app/
 │   │   ├── api/             route handlers
@@ -249,7 +251,6 @@ mylesson-ai/
 ### Prerequisites
 
 - Docker and Docker Compose
-- Node.js 20+
 - Python 3.11+
 - An LLM provider API key
 
@@ -273,8 +274,8 @@ uvicorn app.main:app --reload    # http://localhost:8000
 python -m app.worker
 
 cd ../frontend
-npm install
-npm run dev                      # http://localhost:5173
+pip install -r requirements.txt
+streamlit run app.py             # http://localhost:8501
 ```
 
 API docs at `http://localhost:8000/docs`.
@@ -299,7 +300,7 @@ API docs at `http://localhost:8000/docs`.
 ```bash
 cd backend && pytest              # unit + integration
 pytest -m security                # tenant isolation, prompt injection
-cd ../frontend && npm test
+cd ../frontend && pytest          # Streamlit's AppTest harness (streamlit.testing.v1)
 ```
 
 Generated content cannot be asserted deterministically, so quality is tested three ways:
@@ -397,10 +398,10 @@ Group 2 — [names]
 
 | Name | Role | Contribution |
 |---|---|---|
-| [name] | [role] | [contribution] |
-| [name] | [role] | [contribution] |
-| [name] | [role] | [contribution] |
-| [name] | [role] | [contribution] |
+| Mayank Hete 
+| Jayant 
+| Main 
+| karan
 
 ---
 
