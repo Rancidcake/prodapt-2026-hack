@@ -1,6 +1,6 @@
 import streamlit as st
 
-from api_client import generate_lesson_plan, generate_quiz
+from api_client import generate_lesson_plan, generate_quiz, list_documents, upload_document
 
 st.set_page_config(page_title="MyLesson.ai", page_icon="📘")
 st.title("MyLesson.ai")
@@ -10,6 +10,36 @@ if "lesson_plan" not in st.session_state:
     st.session_state.lesson_plan = None
 if "quiz" not in st.session_state:
     st.session_state.quiz = None
+if "documents" not in st.session_state:
+    try:
+        st.session_state.documents = list_documents()
+    except Exception:  # noqa: BLE001 — backend may not be up yet on first paint
+        st.session_state.documents = []
+
+# --- Source documents (RAG) ---
+
+st.subheader("Source documents")
+st.caption("Upload the teacher's own material to ground generation in it, with citations.")
+
+uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
+if uploaded_file is not None and st.button("Ingest document"):
+    with st.spinner("Parsing, chunking, and embedding…"):
+        try:
+            upload_document(uploaded_file.name, uploaded_file.getvalue())
+            st.session_state.documents = list_documents()
+            st.success(f"Ingested {uploaded_file.name}")
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Upload failed: {exc}")
+
+selected_document_ids: list[int] = []
+if st.session_state.documents:
+    options = {f"{d['title']} ({d['chunk_count']} chunks)": d["id"] for d in st.session_state.documents}
+    selected_labels = st.multiselect("Ground generation in", options=list(options.keys()))
+    selected_document_ids = [options[label] for label in selected_labels]
+else:
+    st.caption("No documents uploaded yet — generation will run ungrounded.")
+
+st.divider()
 
 with st.form("teaching_context_form"):
     st.subheader("Teaching context")
@@ -42,6 +72,7 @@ if submitted:
                     },
                     topic=topic,
                     duration_minutes=duration_minutes,
+                    document_ids=selected_document_ids,
                 )
                 st.session_state.quiz = None
             except Exception as exc:  # noqa: BLE001 — surface any backend error to the teacher
@@ -65,6 +96,8 @@ if plan:
             st.write(section["content"])
             st.markdown(f"**Checks for understanding:** {section['checks_for_understanding']}")
             st.caption(f"Objectives covered: {', '.join(section['objective_ids'])}")
+            if section["citations"]:
+                st.caption(f"Citations: chunk {', '.join(section['citations'])}")
 
     st.subheader("Differentiation notes")
     st.write(plan["differentiation_notes"])
@@ -90,6 +123,7 @@ if plan:
                     objectives=objectives,
                     item_counts={"mcq": mcq_count},
                     difficulty=difficulty,
+                    document_ids=selected_document_ids,
                 )
             except Exception as exc:  # noqa: BLE001
                 st.error(f"Quiz generation failed: {exc}")
@@ -111,3 +145,5 @@ if quiz:
                 st.write(f"- {opt}")
             st.markdown(f"**Correct answer:** {q['correct_answer']}")
             st.caption(f"Objective: {q['objective_id']} · Difficulty: {q['difficulty']}")
+            if q["citations"]:
+                st.caption(f"Citations: chunk {', '.join(q['citations'])}")

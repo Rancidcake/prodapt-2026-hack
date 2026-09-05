@@ -20,6 +20,7 @@ class LessonPlanRequest(BaseModel):
     teaching_context: TeachingContext
     topic: str
     duration_minutes: int = 40
+    document_ids: list[int] = []
 
 
 class LessonPlanSection(BaseModel):
@@ -48,6 +49,7 @@ class QuizRequest(BaseModel):
     objectives: list[Objective]
     item_counts: dict[str, int] = {"mcq": 5}
     difficulty: str = "medium"
+    document_ids: list[int] = []
 
 
 class QuizQuestion(BaseModel):

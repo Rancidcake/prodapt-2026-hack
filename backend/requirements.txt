@@ -3,3 +3,8 @@ pydantic
 fastapi
 uvicorn[standard]
 requests
+sqlalchemy
+psycopg[binary]
+pgvector
+pymupdf
+python-multipart

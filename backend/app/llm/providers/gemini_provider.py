@@ -11,11 +11,13 @@ confirmed by hitting the real endpoint:
 1. Gemini's `responseSchema` rejects `additionalProperties` outright (400
    INVALID_ARGUMENT) — our prompt schemas set it everywhere for Anthropic's
    structured outputs, so it has to be stripped recursively before sending.
-2. This model line does hidden "thinking" by default and bills it as
-   tokens even when the visible output is trivial (measured: 131 total
+2. The non-"lite" flash models do hidden "thinking" by default and bill it
+   as tokens even when the visible output is trivial (measured: 131 total
    tokens to say "Hello", 120 of them thinking). `thinkingConfig.thinkingBudget: 0`
-   eliminates that — set by default here since cost-consciousness is the
-   reason this provider was added in the first place.
+   eliminates that. The "lite" models (e.g. `gemini-flash-lite-latest`)
+   don't do hidden thinking at all and reject `thinkingConfig` outright
+   (400 INVALID_ARGUMENT) — confirmed live — so it's only sent for models
+   that aren't "lite".
 """
 
 import json
@@ -33,7 +35,7 @@ from ..errors import (
 )
 from ..pii_guard import scrub_pii
 
-MODEL_PRIMARY = os.environ.get("LLM_MODEL_PRIMARY", "gemini-flash-latest")
+MODEL_PRIMARY = os.environ.get("LLM_MODEL_PRIMARY", "gemini-flash-lite-latest")
 _API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 _TRUNCATED_REASONS = {"MAX_TOKENS"}
@@ -65,6 +67,14 @@ def generate(
     if not api_key:
         raise MissingCredentialsError("GEMINI_API_KEY is not set. Put it in .env before calling the LLM.")
 
+    generation_config: dict[str, Any] = {
+        "responseMimeType": "application/json",
+        "responseSchema": _strip_unsupported_keys(output_schema),
+        "maxOutputTokens": max_tokens,
+    }
+    if "lite" not in MODEL_PRIMARY:
+        generation_config["thinkingConfig"] = {"thinkingBudget": 0}
+
     try:
         response = requests.post(
             f"{_API_BASE}/{MODEL_PRIMARY}:generateContent",
@@ -72,12 +82,7 @@ def generate(
             json={
                 "contents": [{"parts": [{"text": clean_content}]}],
                 "systemInstruction": {"parts": [{"text": system}]},
-                "generationConfig": {
-                    "responseMimeType": "application/json",
-                    "responseSchema": _strip_unsupported_keys(output_schema),
-                    "maxOutputTokens": max_tokens,
-                    "thinkingConfig": {"thinkingBudget": 0},
-                },
+                "generationConfig": generation_config,
             },
             timeout=120,
         )
