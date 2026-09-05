@@ -122,3 +122,55 @@ def generate_resources(
     )
     response.raise_for_status()
     return response.json()
+
+
+def generate_explanation(
+    auth: Auth,
+    teaching_context: dict,
+    topic: str,
+    document_ids: list[int] | None = None,
+    extra_support: bool = False,
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict:
+    response = requests.post(
+        f"{API_BASE_URL}/generate/explanation",
+        auth=auth,
+        json={
+            "teaching_context": teaching_context,
+            "topic": topic,
+            "document_ids": document_ids or [],
+            "extra_support": extra_support,
+            "provider": provider,
+            "model": model,
+        },
+        timeout=120,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def generate_activity(
+    auth: Auth,
+    teaching_context: dict,
+    topic: str,
+    class_size: int,
+    available_resources: list[str] | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict:
+    response = requests.post(
+        f"{API_BASE_URL}/generate/activity",
+        auth=auth,
+        json={
+            "teaching_context": teaching_context,
+            "topic": topic,
+            "class_size": class_size,
+            "available_resources": available_resources or [],
+            "provider": provider,
+            "model": model,
+        },
+        timeout=120,
+    )
+    response.raise_for_status()
+    return response.json()

@@ -94,3 +94,43 @@ class Resource(BaseModel):
 class ResourcesResponse(BaseModel):
     topic: str
     resources: list[Resource]
+
+
+# --- Explanation (concept simplification) ---
+
+
+class ExplanationRequest(BaseModel):
+    teaching_context: TeachingContext
+    topic: str
+    document_ids: list[int] = []
+    extra_support: bool = False
+    provider: str | None = None
+    model: str | None = None
+
+
+class ExplanationResponse(BaseModel):
+    explanation: str
+    analogies: list[str]
+    common_misconceptions: list[str]
+    is_grounded: bool
+    citations: list[str]
+
+
+# --- Classroom activities ---
+
+
+class ActivityRequest(BaseModel):
+    teaching_context: TeachingContext
+    topic: str
+    class_size: int = 30
+    available_resources: list[str] = []
+    provider: str | None = None
+    model: str | None = None
+
+
+class ActivityResponse(BaseModel):
+    activity_type: str
+    title: str
+    materials: list[str]
+    duration_minutes: int
+    steps: list[str]

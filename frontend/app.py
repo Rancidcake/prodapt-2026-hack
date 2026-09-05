@@ -3,6 +3,8 @@ import streamlit as st
 
 import theme
 from api_client import (
+    generate_activity,
+    generate_explanation,
     generate_lesson_plan,
     generate_quiz,
     generate_resources,
@@ -15,10 +17,23 @@ from api_client import (
 from pdf_export import build_quiz_pdf
 
 st.set_page_config(page_title="MyLesson.ai", page_icon="📘", layout="wide")
-theme.inject()
 
 if "auth" not in st.session_state:
     st.session_state.auth = None
+
+for key, default in [
+    ("large_text", False),
+    ("high_contrast", False),
+    ("reduce_motion", False),
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
+
+theme.inject(
+    large_text=st.session_state.large_text,
+    high_contrast=st.session_state.high_contrast,
+    reduce_motion=st.session_state.reduce_motion,
+)
 
 # --- Login / register gate ---
 
@@ -68,6 +83,8 @@ for key, default in [
     ("lesson_plan", None),
     ("quiz", None),
     ("resources", None),
+    ("explanation", None),
+    ("activity", None),
     ("documents", None),
     ("providers_info", None),
 ]:
@@ -88,7 +105,7 @@ if st.session_state.providers_info is None:
 
 providers_info = st.session_state.providers_info
 
-# --- Sidebar: identity, model, source documents ---
+# --- Sidebar: identity, accessibility, teaching context, model, source documents ---
 
 with st.sidebar:
     st.markdown(f"**Signed in as** `{auth[0]}`")
@@ -97,7 +114,31 @@ with st.sidebar:
         st.session_state.documents = None
         st.session_state.lesson_plan = None
         st.session_state.quiz = None
+        st.session_state.resources = None
+        st.session_state.explanation = None
+        st.session_state.activity = None
         st.rerun()
+
+    st.divider()
+    theme.step_label("ACCESSIBILITY")
+    st.session_state.large_text = st.toggle("Large text", value=st.session_state.large_text)
+    st.session_state.high_contrast = st.toggle("High contrast", value=st.session_state.high_contrast)
+    st.session_state.reduce_motion = st.toggle("Reduce motion", value=st.session_state.reduce_motion)
+
+    st.divider()
+    theme.step_label("TEACHING CONTEXT")
+    grade = st.text_input("Grade/level", placeholder="e.g. Class 9")
+    subject = st.text_input("Subject", placeholder="e.g. Physics")
+    board = st.text_input("Board/curriculum (optional)", placeholder="e.g. CBSE")
+    language = st.text_input("Language", value="English")
+    topic = st.text_input("Topic", placeholder="e.g. Newton's Laws of Motion")
+
+    teaching_context = {
+        "grade": grade,
+        "subject": subject,
+        "board": board or None,
+        "language": language or None,
+    }
 
     st.divider()
     theme.step_label("MODEL")
@@ -143,103 +184,262 @@ theme.ticker(
     f"SOURCES: {len(selected_document_ids)} SELECTED",
 )
 
-theme.step_label("STEP 1 // TEACHING CONTEXT & LESSON REQUEST")
+if not grade or not subject or not topic:
+    st.info("Fill in Grade/level, Subject, and Topic in the sidebar to get started.")
 
-with st.form("teaching_context_form"):
-    col1, col2 = st.columns(2)
-    with col1:
-        grade = st.text_input("Grade/level", placeholder="e.g. Class 9")
-        subject = st.text_input("Subject", placeholder="e.g. Physics")
-    with col2:
-        board = st.text_input("Board/curriculum (optional)", placeholder="e.g. CBSE")
-        language = st.text_input("Language", value="English")
+tab_lesson, tab_quiz, tab_explain, tab_activity, tab_resources = st.tabs(
+    ["📘 Lesson Plan", "📝 Quiz", "💬 Explain a Concept", "🎯 Activity Ideas", "🔗 Resources"]
+)
 
-    topic = st.text_input("Topic", placeholder="e.g. Newton's Laws of Motion")
+# --- Lesson Plan tab ---
+
+with tab_lesson:
+    theme.step_label("GENERATE LESSON PLAN")
     duration_minutes = st.slider("Class duration (minutes)", 20, 90, 40)
 
-    submitted = st.form_submit_button("Generate lesson plan")
+    if st.button("Generate lesson plan", key="btn_lesson_plan"):
+        if not grade or not subject or not topic:
+            st.error("Grade, subject, and topic are required (sidebar).")
+        else:
+            with st.spinner("Generating lesson plan…"):
+                try:
+                    st.session_state.lesson_plan = generate_lesson_plan(
+                        auth,
+                        teaching_context=teaching_context,
+                        topic=topic,
+                        duration_minutes=duration_minutes,
+                        document_ids=selected_document_ids,
+                        provider=selected_provider,
+                        model=selected_model,
+                    )
+                    st.session_state.quiz = None
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Generation failed: {exc}")
 
-if submitted:
-    if not grade or not subject or not topic:
-        st.error("Grade, subject, and topic are required.")
+    plan = st.session_state.lesson_plan
+    if plan:
+        st.divider()
+        st.header(plan["topic"])
+        st.caption(f"{plan['duration_minutes']} minutes")
+
+        st.subheader("Learning objectives")
+        objectives = plan["objectives"]
+        for obj in objectives:
+            st.markdown(f"- **{obj['id']}** — {obj['text']}")
+
+        st.subheader("Sections")
+        for section in plan["sections"]:
+            badge = (
+                theme.chip("GROUNDED", "accent")
+                if section["is_grounded"]
+                else theme.chip("UNGROUNDED — VERIFY", "ink")
+            )
+            with st.expander(f"{section['title']} ({section['timing_minutes']} min)"):
+                theme.chips(badge)
+                st.write(section["content"])
+                st.markdown(f"**Checks for understanding:** {section['checks_for_understanding']}")
+                st.caption(f"Objectives covered: {', '.join(section['objective_ids'])}")
+                if section["citations"]:
+                    st.caption(f"Citations: chunk {', '.join(section['citations'])}")
+
+        st.subheader("Differentiation notes")
+        st.write(plan["differentiation_notes"])
     else:
-        with st.spinner("Generating lesson plan…"):
+        objectives = None
+
+# --- Quiz tab ---
+
+with tab_quiz:
+    theme.step_label("GENERATE QUIZ")
+    plan = st.session_state.lesson_plan
+
+    if not plan:
+        st.info("Generate a lesson plan first — quiz questions are tagged to its learning objectives.")
+    else:
+        qcol1, qcol2 = st.columns(2)
+        with qcol1:
+            mcq_count = st.number_input("MCQ count", min_value=0, max_value=20, value=5)
+        with qcol2:
+            difficulty = st.selectbox("Difficulty", ["easy", "medium", "hard"], index=1)
+
+        if st.button("Generate quiz", key="btn_quiz"):
+            with st.spinner("Generating quiz…"):
+                try:
+                    st.session_state.quiz = generate_quiz(
+                        auth,
+                        teaching_context=teaching_context,
+                        objectives=plan["objectives"],
+                        item_counts={"mcq": mcq_count},
+                        difficulty=difficulty,
+                        document_ids=selected_document_ids,
+                        provider=selected_provider,
+                        model=selected_model,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Quiz generation failed: {exc}")
+
+        quiz = st.session_state.quiz
+        if quiz:
+            st.divider()
+            if quiz["uncovered_objective_ids"]:
+                st.warning(f"Objectives with no question: {', '.join(quiz['uncovered_objective_ids'])}")
+            else:
+                st.success("Every objective is covered by at least one question.")
+
             try:
-                st.session_state.lesson_plan = generate_lesson_plan(
-                    auth,
-                    teaching_context={
-                        "grade": grade,
-                        "subject": subject,
-                        "board": board or None,
-                        "language": language or None,
-                    },
-                    topic=topic,
-                    duration_minutes=duration_minutes,
-                    document_ids=selected_document_ids,
-                    provider=selected_provider,
-                    model=selected_model,
-                )
-                st.session_state.quiz = None
-                st.session_state.resources = None
-            except Exception as exc:  # noqa: BLE001 — surface any backend error to the teacher
-                st.error(f"Generation failed: {exc}")
-
-plan = st.session_state.lesson_plan
-if plan:
-    st.divider()
-    theme.step_label("STEP 2 // REVIEW LESSON PLAN")
-    st.header(plan["topic"])
-    st.caption(f"{plan['duration_minutes']} minutes")
-
-    st.subheader("Learning objectives")
-    objectives = plan["objectives"]
-    for obj in objectives:
-        st.markdown(f"- **{obj['id']}** — {obj['text']}")
-
-    st.subheader("Sections")
-    for section in plan["sections"]:
-        badge = theme.chip("GROUNDED", "accent") if section["is_grounded"] else theme.chip("UNGROUNDED — VERIFY", "ink")
-        with st.expander(f"{section['title']} ({section['timing_minutes']} min)"):
-            theme.chips(badge)
-            st.write(section["content"])
-            st.markdown(f"**Checks for understanding:** {section['checks_for_understanding']}")
-            st.caption(f"Objectives covered: {', '.join(section['objective_ids'])}")
-            if section["citations"]:
-                st.caption(f"Citations: chunk {', '.join(section['citations'])}")
-
-    st.subheader("Differentiation notes")
-    st.write(plan["differentiation_notes"])
-
-    st.divider()
-    theme.step_label("STEP 3 // FURTHER-READING RESOURCES")
-    st.caption(
-        "AI-suggested — no live web search happens here, so links are only marked GOOD LINK when the "
-        "model is confident it's a real, well-known page. Anything else is a search suggestion, not a URL."
-    )
-
-    if st.button("Find learning resources"):
-        with st.spinner("Finding resources…"):
-            try:
-                st.session_state.resources = generate_resources(
-                    auth,
-                    teaching_context={
-                        "grade": grade,
-                        "subject": subject,
-                        "board": board or None,
-                        "language": language or None,
-                    },
+                pdf_bytes = build_quiz_pdf(
+                    quiz=quiz,
+                    teaching_context={"grade": grade, "subject": subject, "board": board},
                     topic=plan["topic"],
-                    document_ids=selected_document_ids,
-                    provider=selected_provider,
-                    model=selected_model,
+                )
+                st.download_button(
+                    "Download quiz (PDF)",
+                    data=pdf_bytes,
+                    file_name="quiz.pdf",
+                    mime="application/pdf",
                 )
             except Exception as exc:  # noqa: BLE001
-                st.error(f"Could not find resources: {exc}")
+                st.error(f"Could not build PDF: {exc}")
+
+            for i, q in enumerate(quiz["questions"], start=1):
+                badge = theme.chip("GROUNDED", "accent") if q["is_grounded"] else theme.chip("UNGROUNDED", "ink")
+                with st.expander(f"Q{i}. {q['stem'][:60]}…"):
+                    theme.chips(badge)
+                    st.write(q["stem"])
+                    for opt in q["options"]:
+                        st.write(f"- {opt}")
+                    st.markdown(f"**Correct answer:** {q['correct_answer']}")
+                    st.caption(f"Objective: {q['objective_id']} · Difficulty: {q['difficulty']}")
+                    if q["citations"]:
+                        st.caption(f"Citations: chunk {', '.join(q['citations'])}")
+
+# --- Explain a Concept tab ---
+
+with tab_explain:
+    theme.step_label("EXPLAIN A CONCEPT")
+    extra_support = st.toggle(
+        "Extra support mode",
+        help="For students who need additional support — dyslexia, ADHD, an intellectual "
+        "disability, or English-language learners. Shorter sentences, one idea at a time, "
+        "concrete examples before abstract ones, no idioms.",
+    )
+
+    if st.button("Explain", key="btn_explain"):
+        if not grade or not subject or not topic:
+            st.error("Grade, subject, and topic are required (sidebar).")
+        else:
+            with st.spinner("Explaining…"):
+                try:
+                    st.session_state.explanation = generate_explanation(
+                        auth,
+                        teaching_context=teaching_context,
+                        topic=topic,
+                        document_ids=selected_document_ids,
+                        extra_support=extra_support,
+                        provider=selected_provider,
+                        model=selected_model,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Could not generate explanation: {exc}")
+
+    explanation = st.session_state.explanation
+    if explanation:
+        st.divider()
+        badge = theme.chip("GROUNDED", "accent") if explanation["is_grounded"] else theme.chip("UNGROUNDED — VERIFY", "ink")
+        theme.chips(badge)
+        st.write(explanation["explanation"])
+
+        st.subheader("Analogies")
+        for a in explanation["analogies"]:
+            st.markdown(f"- {a}")
+
+        st.subheader("Common misconceptions")
+        for m in explanation["common_misconceptions"]:
+            st.markdown(f"- {m}")
+
+        if explanation["citations"]:
+            st.caption(f"Citations: chunk {', '.join(explanation['citations'])}")
+
+# --- Activity Ideas tab ---
+
+with tab_activity:
+    theme.step_label("ACTIVITY IDEAS")
+    acol1, acol2 = st.columns(2)
+    with acol1:
+        class_size = st.number_input("Class size", min_value=1, max_value=200, value=30)
+    with acol2:
+        resources_text = st.text_input("Available resources (comma-separated)", placeholder="e.g. whiteboard, chart paper")
+    available_resources = [r.strip() for r in resources_text.split(",") if r.strip()] if resources_text else []
+
+    if st.button("Generate activity", key="btn_activity"):
+        if not grade or not subject or not topic:
+            st.error("Grade, subject, and topic are required (sidebar).")
+        else:
+            with st.spinner("Designing activity…"):
+                try:
+                    st.session_state.activity = generate_activity(
+                        auth,
+                        teaching_context=teaching_context,
+                        topic=topic,
+                        class_size=class_size,
+                        available_resources=available_resources,
+                        provider=selected_provider,
+                        model=selected_model,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Could not generate activity: {exc}")
+
+    activity = st.session_state.activity
+    if activity:
+        st.divider()
+        theme.chips(theme.chip(activity["activity_type"].replace("_", " ").upper(), "outline"))
+        st.header(activity["title"])
+        st.caption(f"{activity['duration_minutes']} minutes")
+
+        st.subheader("Materials")
+        for m in activity["materials"]:
+            st.markdown(f"- {m}")
+
+        st.subheader("Steps")
+        for i, step in enumerate(activity["steps"], start=1):
+            st.markdown(f"{i}. {step}")
+
+# --- Resources tab ---
+
+with tab_resources:
+    theme.step_label("FURTHER-READING RESOURCES")
+    st.caption(
+        "AI-suggested — no live web search happens here, so links are only marked GOOD LINK when "
+        "the model is confident it's a real, well-known page. Anything else is a search suggestion, "
+        "not a URL."
+    )
+
+    if st.button("Find learning resources", key="btn_resources"):
+        if not grade or not subject or not topic:
+            st.error("Grade, subject, and topic are required (sidebar).")
+        else:
+            with st.spinner("Finding resources…"):
+                try:
+                    st.session_state.resources = generate_resources(
+                        auth,
+                        teaching_context=teaching_context,
+                        topic=topic,
+                        document_ids=selected_document_ids,
+                        provider=selected_provider,
+                        model=selected_model,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Could not find resources: {exc}")
 
     resources = st.session_state.resources
     if resources:
+        st.divider()
         for r in resources["resources"]:
-            badge = theme.chip("GOOD LINK", "accent") if r["confidence"] == "high" else theme.chip("VERIFY BEFORE SHARING", "ink")
+            badge = (
+                theme.chip("GOOD LINK", "accent")
+                if r["confidence"] == "high"
+                else theme.chip("VERIFY BEFORE SHARING", "ink")
+            )
             type_badge = theme.chip(r["type"].upper(), "outline")
             with st.container(border=True):
                 theme.chips(badge, type_badge)
@@ -248,69 +448,3 @@ if plan:
                 else:
                     st.markdown(f"**{r['title']}** _(search for this)_")
                 st.caption(r["description"])
-
-    st.divider()
-    theme.step_label("STEP 4 // GENERATE QUIZ")
-    qcol1, qcol2 = st.columns(2)
-    with qcol1:
-        mcq_count = st.number_input("MCQ count", min_value=0, max_value=20, value=5)
-    with qcol2:
-        difficulty = st.selectbox("Difficulty", ["easy", "medium", "hard"], index=1)
-
-    if st.button("Generate quiz"):
-        with st.spinner("Generating quiz…"):
-            try:
-                st.session_state.quiz = generate_quiz(
-                    auth,
-                    teaching_context={
-                        "grade": grade,
-                        "subject": subject,
-                        "board": board or None,
-                        "language": language or None,
-                    },
-                    objectives=objectives,
-                    item_counts={"mcq": mcq_count},
-                    difficulty=difficulty,
-                    document_ids=selected_document_ids,
-                    provider=selected_provider,
-                    model=selected_model,
-                )
-            except Exception as exc:  # noqa: BLE001
-                st.error(f"Quiz generation failed: {exc}")
-
-quiz = st.session_state.quiz
-if quiz:
-    st.divider()
-    theme.step_label("STEP 5 // REVIEW & DOWNLOAD QUIZ")
-    st.header("Quiz")
-    if quiz["uncovered_objective_ids"]:
-        st.warning(f"Objectives with no question: {', '.join(quiz['uncovered_objective_ids'])}")
-    else:
-        st.success("Every objective is covered by at least one question.")
-
-    try:
-        pdf_bytes = build_quiz_pdf(
-            quiz=quiz,
-            teaching_context={"grade": grade, "subject": subject, "board": board},
-            topic=plan["topic"] if plan else "Quiz",
-        )
-        st.download_button(
-            "Download quiz (PDF)",
-            data=pdf_bytes,
-            file_name="quiz.pdf",
-            mime="application/pdf",
-        )
-    except Exception as exc:  # noqa: BLE001
-        st.error(f"Could not build PDF: {exc}")
-
-    for i, q in enumerate(quiz["questions"], start=1):
-        badge = theme.chip("GROUNDED", "accent") if q["is_grounded"] else theme.chip("UNGROUNDED", "ink")
-        with st.expander(f"Q{i}. {q['stem'][:60]}…"):
-            theme.chips(badge)
-            st.write(q["stem"])
-            for opt in q["options"]:
-                st.write(f"- {opt}")
-            st.markdown(f"**Correct answer:** {q['correct_answer']}")
-            st.caption(f"Objective: {q['objective_id']} · Difficulty: {q['difficulty']}")
-            if q["citations"]:
-                st.caption(f"Citations: chunk {', '.join(q['citations'])}")

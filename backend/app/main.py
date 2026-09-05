@@ -22,6 +22,10 @@ from .models.user import User
 from .schemas.auth import RegisterRequest, UserResponse
 from .schemas.document import DocumentResponse
 from .schemas.generation import (
+    ActivityRequest,
+    ActivityResponse,
+    ExplanationRequest,
+    ExplanationResponse,
     LessonPlanRequest,
     LessonPlanResponse,
     QuizRequest,
@@ -239,3 +243,55 @@ def generate_resources(
     except (GenerationTruncatedError, GenerationRefusedError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return ResourcesResponse(**result.output)
+
+
+@app.post("/generate/explanation", response_model=ExplanationResponse)
+def generate_explanation(
+    req: ExplanationRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> ExplanationResponse:
+    try:
+        chunks = retrieve(session, query=req.topic, document_ids=req.document_ids, tenant_id=current_user.id)
+        result = generate(
+            "explanation",
+            teaching_context=req.teaching_context.model_dump(),
+            topic=req.topic,
+            chunks=chunks,
+            extra_support=req.extra_support,
+            provider=req.provider,
+            model=req.model,
+        )
+    except EmbeddingError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except MissingCredentialsError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except LLMProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except (GenerationTruncatedError, GenerationRefusedError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return ExplanationResponse(**result.output)
+
+
+@app.post("/generate/activity", response_model=ActivityResponse)
+def generate_activity(
+    req: ActivityRequest,
+    current_user: User = Depends(get_current_user),
+) -> ActivityResponse:
+    try:
+        result = generate(
+            "activity",
+            teaching_context=req.teaching_context.model_dump(),
+            topic=req.topic,
+            class_size=req.class_size,
+            available_resources=req.available_resources,
+            provider=req.provider,
+            model=req.model,
+        )
+    except MissingCredentialsError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except LLMProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except (GenerationTruncatedError, GenerationRefusedError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return ActivityResponse(**result.output)
