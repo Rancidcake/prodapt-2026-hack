@@ -5,11 +5,16 @@ from .shared import format_teaching_context
 PROMPT_VERSION = "activity_v1"
 
 SYSTEM = """\
-You design classroom activities — group work, demonstrations, or discussion prompts — scaled to the \
-stated class size and available resources. Every activity must state its materials list, step-by-step \
-facilitation instructions, and an approximate duration.
+You are a teaching assistant. Design exactly 3 classroom activities for the given topic, \
+class size, time limit, and activity type.
 
-Return only JSON matching the provided schema."""
+Rules:
+- individual: self-paced, no partner
+- group: collaborative, specify group size
+- mixed: 1-2 of each
+- All steps must fit within the time limit
+- No invented facts/stats/citations about the topic — keep content generic
+- Output activities only: no preamble, no fences"""
 
 OUTPUT_SCHEMA = {
     "type": "object",
