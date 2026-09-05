@@ -194,7 +194,6 @@ tab_lesson, tab_quiz, tab_explain, tab_activity, tab_resources = st.tabs(
 # --- Lesson Plan tab ---
 
 with tab_lesson:
-    theme.step_label("GENERATE LESSON PLAN")
     duration_minutes = st.slider("Class duration (minutes)", 20, 90, 40)
 
     if st.button("Generate lesson plan", key="btn_lesson_plan"):
@@ -250,7 +249,6 @@ with tab_lesson:
 # --- Quiz tab ---
 
 with tab_quiz:
-    theme.step_label("GENERATE QUIZ")
     plan = st.session_state.lesson_plan
 
     if not plan:
@@ -316,7 +314,6 @@ with tab_quiz:
 # --- Explain a Concept tab ---
 
 with tab_explain:
-    theme.step_label("EXPLAIN A CONCEPT")
     extra_support = st.toggle(
         "Extra support mode",
         help="For students who need additional support — dyslexia, ADHD, an intellectual "
@@ -363,7 +360,6 @@ with tab_explain:
 # --- Activity Ideas tab ---
 
 with tab_activity:
-    theme.step_label("ACTIVITY IDEAS")
     acol1, acol2 = st.columns(2)
     with acol1:
         class_size = st.number_input("Class size", min_value=1, max_value=200, value=30)
@@ -407,7 +403,6 @@ with tab_activity:
 # --- Resources tab ---
 
 with tab_resources:
-    theme.step_label("FURTHER-READING RESOURCES")
     st.caption(
         "AI-suggested — no live web search happens here, so links are only marked GOOD LINK when "
         "the model is confident it's a real, well-known page. Anything else is a search suggestion, "
