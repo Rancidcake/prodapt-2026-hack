@@ -28,7 +28,7 @@ The system shall generate a lesson plan containing:
 - Learning objectives
 - Prerequisites
 - Duration and timings
-- Introduction/hook
+- Introduction
 - Teacher activities
 - Student activities
 - Guided/independent practice
