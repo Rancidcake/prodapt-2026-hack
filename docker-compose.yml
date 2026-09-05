@@ -1,0 +1,95 @@
+# MyLesson.ai — local/demo container stack.
+#
+# Reads secrets from the same .env file run_everything.py already uses
+# (ANTHROPIC_API_KEY, GEMINI_API_KEY, LLM_PROVIDER, LLM_MODEL_PRIMARY) —
+# Compose auto-loads a .env file in the same directory as this file, so no
+# separate docker-specific env file is needed.
+#
+# Two corrections vs. the original spec, verified before writing this file:
+#   - `pgvector/pgvector:pg16-latest` is not a real tag (checked Docker Hub);
+#     using `pg16` instead.
+#   - `claude-3-5-sonnet-20241022` was retired 2025-10-28. LLM_MODEL_PRIMARY
+#     is passed through only if set on the host — if unset, each provider's
+#     own current-model default in code wins instead of a hardcoded fallback
+#     baked into two places that can drift out of sync.
+#
+# Not a production orchestrator — see the scaling note above the `backend`
+# service for what this setup does and doesn't give you.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mylesson-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: mylesson
+      POSTGRES_USER: teacher
+      POSTGRES_PASSWORD: hackathon123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teacher"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: mylesson-api
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Internal container DNS ("postgres" = the service name above) — not
+      # sourced from the host .env, since that points at localhost, which
+      # doesn't resolve to anything from inside this container.
+      DATABASE_URL: postgresql+psycopg://teacher:hackathon123@postgres:5432/mylesson
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      # Pass-through, no baked-in default — omitted entirely from the
+      # container's env if unset on the host, so the provider modules' own
+      # current-model defaults apply instead of a value hardcoded here.
+      LLM_PROVIDER: ${LLM_PROVIDER}
+      LLM_MODEL_PRIMARY: ${LLM_MODEL_PRIMARY}
+    command: uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    # Horizontal scaling note: this compose file is for local/demo container
+    # parity, not a production orchestrator. `container_name` above pins one
+    # instance for easy `docker logs mylesson-api`; to run more than one,
+    # remove `container_name` and run `docker compose up --scale backend=3`
+    # behind a load balancer. Real production scaling (autoscaling, rolling
+    # deploys, multi-node) is a Kubernetes/ECS decision, not a compose one —
+    # the limits below just stop one container from starving the host.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  frontend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: mylesson-ui
+    ports:
+      - "8501:8501"
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      API_BASE_URL: http://backend:8000
+    command: streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+volumes:
+  postgres_data:

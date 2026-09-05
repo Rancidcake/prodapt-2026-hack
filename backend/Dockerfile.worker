@@ -1,0 +1,22 @@
+# MyLesson.ai — background worker image (Phase 2 scaffolding).
+#
+# `python -m app.worker` does not exist yet — see KT.md §9-11 for the
+# persistence/queue work this depends on (README Decision 8: a Postgres-
+# backed queue table consumed with SELECT ... FOR UPDATE SKIP LOCKED).
+# This image is ready to build the moment that module lands. It is
+# deliberately NOT wired into docker-compose.yml as a running service yet
+# — building it today would only produce a container that crashes on
+# start with ModuleNotFoundError.
+#
+# Backend-only: no frontend/ code, no frontend dependencies.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend/ ./
+
+CMD ["python", "-m", "app.worker"]

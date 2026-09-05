@@ -1,0 +1,10 @@
+.venv
+backend/.venv
+frontend/.venv
+**/__pycache__
+**/*.pyc
+.git
+.env
+.claude
+*.md
+*.png
