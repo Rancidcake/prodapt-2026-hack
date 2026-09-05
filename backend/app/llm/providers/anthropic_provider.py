@@ -47,17 +47,19 @@ def generate(
     prompt_version: str,
     effort: str = "high",
     max_tokens: int = 8000,
+    model: str | None = None,
 ) -> GenerationResult:
+    resolved_model = model or MODEL_PRIMARY
     clean_content, pii_hits = scrub_pii(user_content)
 
     request: dict[str, Any] = {
-        "model": MODEL_PRIMARY,
+        "model": resolved_model,
         "max_tokens": max_tokens,
         "output_config": {"format": {"type": "json_schema", "schema": output_schema}},
         "system": system,
         "messages": [{"role": "user", "content": clean_content}],
     }
-    if _supports_adaptive_thinking(MODEL_PRIMARY):
+    if _supports_adaptive_thinking(resolved_model):
         request["thinking"] = {"type": "adaptive"}
         request["output_config"]["effort"] = effort
 

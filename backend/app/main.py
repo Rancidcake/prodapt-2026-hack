@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from .auth import get_current_user, hash_password
 from .db import get_session, init_db
 from .llm.client import (
+    AVAILABLE_MODELS,
+    DEFAULT_PROVIDER,
     GenerationRefusedError,
     GenerationTruncatedError,
     LLMProviderError,
@@ -24,6 +26,8 @@ from .schemas.generation import (
     LessonPlanResponse,
     QuizRequest,
     QuizResponse,
+    ResourcesRequest,
+    ResourcesResponse,
 )
 from .services.generation.orchestrator import generate
 from .services.ingestion.chunker import chunk_pages
@@ -49,6 +53,11 @@ def on_startup() -> None:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/providers")
+def list_providers() -> dict:
+    return {"default_provider": DEFAULT_PROVIDER, "models": AVAILABLE_MODELS}
 
 
 # --- Auth ---
@@ -161,6 +170,8 @@ def generate_lesson_plan(
             topic=req.topic,
             duration_minutes=req.duration_minutes,
             chunks=chunks,
+            provider=req.provider,
+            model=req.model,
         )
     except EmbeddingError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -189,6 +200,8 @@ def generate_quiz(
             item_counts=req.item_counts,
             difficulty=req.difficulty,
             chunks=chunks,
+            provider=req.provider,
+            model=req.model,
         )
     except EmbeddingError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -199,3 +212,30 @@ def generate_quiz(
     except (GenerationTruncatedError, GenerationRefusedError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return QuizResponse(**result.output)
+
+
+@app.post("/generate/resources", response_model=ResourcesResponse)
+def generate_resources(
+    req: ResourcesRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> ResourcesResponse:
+    try:
+        chunks = retrieve(session, query=req.topic, document_ids=req.document_ids, tenant_id=current_user.id)
+        result = generate(
+            "resources",
+            teaching_context=req.teaching_context.model_dump(),
+            topic=req.topic,
+            chunks=chunks,
+            provider=req.provider,
+            model=req.model,
+        )
+    except EmbeddingError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except MissingCredentialsError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except LLMProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except (GenerationTruncatedError, GenerationRefusedError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return ResourcesResponse(**result.output)

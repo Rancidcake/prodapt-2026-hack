@@ -1,16 +1,21 @@
 import requests
 import streamlit as st
 
+import theme
 from api_client import (
     generate_lesson_plan,
     generate_quiz,
+    generate_resources,
     list_documents,
+    list_providers,
     register,
     upload_document,
     whoami,
 )
+from pdf_export import build_quiz_pdf
 
-st.set_page_config(page_title="MyLesson.ai", page_icon="📘")
+st.set_page_config(page_title="MyLesson.ai", page_icon="📘", layout="wide")
+theme.inject()
 
 if "auth" not in st.session_state:
     st.session_state.auth = None
@@ -19,6 +24,7 @@ if "auth" not in st.session_state:
 
 if st.session_state.auth is None:
     st.title("MyLesson.ai")
+    theme.step_label("SIGN IN // TEACHER ACCESS")
     st.caption("Sign in to keep your uploaded material and generations private to you.")
 
     login_tab, register_tab = st.tabs(["Log in", "Create account"])
@@ -56,57 +62,90 @@ if st.session_state.auth is None:
 
 auth = st.session_state.auth
 
-# --- Main app (authenticated) ---
+# --- Session state ---
 
-top_left, top_right = st.columns([5, 1])
-with top_left:
-    st.title("MyLesson.ai")
-    st.caption(f"Signed in as **{auth[0]}** — draft, review, approve.")
-with top_right:
-    if st.button("Log out"):
-        st.session_state.auth = None
-        st.session_state.pop("documents", None)
-        st.session_state.pop("lesson_plan", None)
-        st.session_state.pop("quiz", None)
-        st.rerun()
+for key, default in [
+    ("lesson_plan", None),
+    ("quiz", None),
+    ("resources", None),
+    ("documents", None),
+    ("providers_info", None),
+]:
+    if key not in st.session_state:
+        st.session_state[key] = default
 
-if "lesson_plan" not in st.session_state:
-    st.session_state.lesson_plan = None
-if "quiz" not in st.session_state:
-    st.session_state.quiz = None
-if "documents" not in st.session_state:
+if st.session_state.documents is None:
     try:
         st.session_state.documents = list_documents(auth)
     except Exception:  # noqa: BLE001 — backend may not be up yet on first paint
         st.session_state.documents = []
 
-# --- Source documents (RAG) ---
+if st.session_state.providers_info is None:
+    try:
+        st.session_state.providers_info = list_providers()
+    except Exception:  # noqa: BLE001
+        st.session_state.providers_info = {"default_provider": "anthropic", "models": {"anthropic": []}}
 
-st.subheader("Source documents")
-st.caption("Upload the teacher's own material to ground generation in it, with citations.")
+providers_info = st.session_state.providers_info
 
-uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
-if uploaded_file is not None and st.button("Ingest document"):
-    with st.spinner("Parsing, chunking, and embedding…"):
-        try:
-            upload_document(auth, uploaded_file.name, uploaded_file.getvalue())
-            st.session_state.documents = list_documents(auth)
-            st.success(f"Ingested {uploaded_file.name}")
-        except Exception as exc:  # noqa: BLE001
-            st.error(f"Upload failed: {exc}")
+# --- Sidebar: identity, model, source documents ---
 
-selected_document_ids: list[int] = []
-if st.session_state.documents:
-    options = {f"{d['title']} ({d['chunk_count']} chunks)": d["id"] for d in st.session_state.documents}
-    selected_labels = st.multiselect("Ground generation in", options=list(options.keys()))
-    selected_document_ids = [options[label] for label in selected_labels]
-else:
-    st.caption("No documents uploaded yet — generation will run ungrounded.")
+with st.sidebar:
+    st.markdown(f"**Signed in as** `{auth[0]}`")
+    if st.button("Log out"):
+        st.session_state.auth = None
+        st.session_state.documents = None
+        st.session_state.lesson_plan = None
+        st.session_state.quiz = None
+        st.rerun()
 
-st.divider()
+    st.divider()
+    theme.step_label("MODEL")
+    provider_options = list(providers_info["models"].keys())
+    default_provider_index = (
+        provider_options.index(providers_info["default_provider"])
+        if providers_info["default_provider"] in provider_options
+        else 0
+    )
+    selected_provider = st.selectbox("Provider", provider_options, index=default_provider_index)
+    model_options = providers_info["models"].get(selected_provider, [])
+    selected_model = st.selectbox("Model", model_options) if model_options else None
+
+    st.divider()
+    theme.step_label("SOURCE DOCUMENTS")
+    st.caption("Upload the teacher's own material to ground generation in it, with citations.")
+
+    uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
+    if uploaded_file is not None and st.button("Ingest document"):
+        with st.spinner("Parsing, chunking, and embedding…"):
+            try:
+                upload_document(auth, uploaded_file.name, uploaded_file.getvalue())
+                st.session_state.documents = list_documents(auth)
+                st.success(f"Ingested {uploaded_file.name}")
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Upload failed: {exc}")
+
+    selected_document_ids: list[int] = []
+    if st.session_state.documents:
+        options = {f"{d['title']} ({d['chunk_count']} chunks)": d["id"] for d in st.session_state.documents}
+        selected_labels = st.multiselect("Ground generation in", options=list(options.keys()))
+        selected_document_ids = [options[label] for label in selected_labels]
+    else:
+        st.caption("No documents uploaded yet — generation will run ungrounded.")
+
+# --- Main area ---
+
+st.title("MyLesson.ai")
+theme.ticker(
+    f"TEACHER: {auth[0].upper()}",
+    f"PROVIDER: {selected_provider.upper()}",
+    f"MODEL: {(selected_model or 'DEFAULT').upper()}",
+    f"SOURCES: {len(selected_document_ids)} SELECTED",
+)
+
+theme.step_label("STEP 1 // TEACHING CONTEXT & LESSON REQUEST")
 
 with st.form("teaching_context_form"):
-    st.subheader("Teaching context")
     col1, col2 = st.columns(2)
     with col1:
         grade = st.text_input("Grade/level", placeholder="e.g. Class 9")
@@ -115,7 +154,6 @@ with st.form("teaching_context_form"):
         board = st.text_input("Board/curriculum (optional)", placeholder="e.g. CBSE")
         language = st.text_input("Language", value="English")
 
-    st.subheader("Lesson request")
     topic = st.text_input("Topic", placeholder="e.g. Newton's Laws of Motion")
     duration_minutes = st.slider("Class duration (minutes)", 20, 90, 40)
 
@@ -138,14 +176,18 @@ if submitted:
                     topic=topic,
                     duration_minutes=duration_minutes,
                     document_ids=selected_document_ids,
+                    provider=selected_provider,
+                    model=selected_model,
                 )
                 st.session_state.quiz = None
+                st.session_state.resources = None
             except Exception as exc:  # noqa: BLE001 — surface any backend error to the teacher
                 st.error(f"Generation failed: {exc}")
 
 plan = st.session_state.lesson_plan
 if plan:
     st.divider()
+    theme.step_label("STEP 2 // REVIEW LESSON PLAN")
     st.header(plan["topic"])
     st.caption(f"{plan['duration_minutes']} minutes")
 
@@ -156,8 +198,9 @@ if plan:
 
     st.subheader("Sections")
     for section in plan["sections"]:
-        badge = "✅ grounded" if section["is_grounded"] else "⚠️ ungrounded — verify before use"
-        with st.expander(f"{section['title']} ({section['timing_minutes']} min) — {badge}"):
+        badge = theme.chip("GROUNDED", "accent") if section["is_grounded"] else theme.chip("UNGROUNDED — VERIFY", "ink")
+        with st.expander(f"{section['title']} ({section['timing_minutes']} min)"):
+            theme.chips(badge)
             st.write(section["content"])
             st.markdown(f"**Checks for understanding:** {section['checks_for_understanding']}")
             st.caption(f"Objectives covered: {', '.join(section['objective_ids'])}")
@@ -168,7 +211,46 @@ if plan:
     st.write(plan["differentiation_notes"])
 
     st.divider()
-    st.subheader("Generate a quiz from these objectives")
+    theme.step_label("STEP 3 // FURTHER-READING RESOURCES")
+    st.caption(
+        "AI-suggested — no live web search happens here, so links are only marked GOOD LINK when the "
+        "model is confident it's a real, well-known page. Anything else is a search suggestion, not a URL."
+    )
+
+    if st.button("Find learning resources"):
+        with st.spinner("Finding resources…"):
+            try:
+                st.session_state.resources = generate_resources(
+                    auth,
+                    teaching_context={
+                        "grade": grade,
+                        "subject": subject,
+                        "board": board or None,
+                        "language": language or None,
+                    },
+                    topic=plan["topic"],
+                    document_ids=selected_document_ids,
+                    provider=selected_provider,
+                    model=selected_model,
+                )
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Could not find resources: {exc}")
+
+    resources = st.session_state.resources
+    if resources:
+        for r in resources["resources"]:
+            badge = theme.chip("GOOD LINK", "accent") if r["confidence"] == "high" else theme.chip("VERIFY BEFORE SHARING", "ink")
+            type_badge = theme.chip(r["type"].upper(), "outline")
+            with st.container(border=True):
+                theme.chips(badge, type_badge)
+                if r["confidence"] == "high" and r["url"]:
+                    st.markdown(f"**[{r['title']}]({r['url']})**")
+                else:
+                    st.markdown(f"**{r['title']}** _(search for this)_")
+                st.caption(r["description"])
+
+    st.divider()
+    theme.step_label("STEP 4 // GENERATE QUIZ")
     qcol1, qcol2 = st.columns(2)
     with qcol1:
         mcq_count = st.number_input("MCQ count", min_value=0, max_value=20, value=5)
@@ -190,6 +272,8 @@ if plan:
                     item_counts={"mcq": mcq_count},
                     difficulty=difficulty,
                     document_ids=selected_document_ids,
+                    provider=selected_provider,
+                    model=selected_model,
                 )
             except Exception as exc:  # noqa: BLE001
                 st.error(f"Quiz generation failed: {exc}")
@@ -197,15 +281,32 @@ if plan:
 quiz = st.session_state.quiz
 if quiz:
     st.divider()
+    theme.step_label("STEP 5 // REVIEW & DOWNLOAD QUIZ")
     st.header("Quiz")
     if quiz["uncovered_objective_ids"]:
         st.warning(f"Objectives with no question: {', '.join(quiz['uncovered_objective_ids'])}")
     else:
         st.success("Every objective is covered by at least one question.")
 
+    try:
+        pdf_bytes = build_quiz_pdf(
+            quiz=quiz,
+            teaching_context={"grade": grade, "subject": subject, "board": board},
+            topic=plan["topic"] if plan else "Quiz",
+        )
+        st.download_button(
+            "Download quiz (PDF)",
+            data=pdf_bytes,
+            file_name="quiz.pdf",
+            mime="application/pdf",
+        )
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Could not build PDF: {exc}")
+
     for i, q in enumerate(quiz["questions"], start=1):
-        badge = "✅ grounded" if q["is_grounded"] else "⚠️ ungrounded"
-        with st.expander(f"Q{i}. {q['stem'][:60]}… — {badge}"):
+        badge = theme.chip("GROUNDED", "accent") if q["is_grounded"] else theme.chip("UNGROUNDED", "ink")
+        with st.expander(f"Q{i}. {q['stem'][:60]}…"):
+            theme.chips(badge)
             st.write(q["stem"])
             for opt in q["options"]:
                 st.write(f"- {opt}")

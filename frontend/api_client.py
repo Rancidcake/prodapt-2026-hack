@@ -23,6 +23,12 @@ def whoami(auth: Auth) -> dict:
     return response.json()
 
 
+def list_providers() -> dict:
+    response = requests.get(f"{API_BASE_URL}/providers", timeout=30)
+    response.raise_for_status()
+    return response.json()
+
+
 def upload_document(auth: Auth, filename: str, file_bytes: bytes) -> dict:
     response = requests.post(
         f"{API_BASE_URL}/documents",
@@ -46,6 +52,8 @@ def generate_lesson_plan(
     topic: str,
     duration_minutes: int,
     document_ids: list[int] | None = None,
+    provider: str | None = None,
+    model: str | None = None,
 ) -> dict:
     response = requests.post(
         f"{API_BASE_URL}/generate/lesson-plan",
@@ -55,6 +63,8 @@ def generate_lesson_plan(
             "topic": topic,
             "duration_minutes": duration_minutes,
             "document_ids": document_ids or [],
+            "provider": provider,
+            "model": model,
         },
         timeout=120,
     )
@@ -69,6 +79,8 @@ def generate_quiz(
     item_counts: dict,
     difficulty: str,
     document_ids: list[int] | None = None,
+    provider: str | None = None,
+    model: str | None = None,
 ) -> dict:
     response = requests.post(
         f"{API_BASE_URL}/generate/quiz",
@@ -79,6 +91,32 @@ def generate_quiz(
             "item_counts": item_counts,
             "difficulty": difficulty,
             "document_ids": document_ids or [],
+            "provider": provider,
+            "model": model,
+        },
+        timeout=120,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def generate_resources(
+    auth: Auth,
+    teaching_context: dict,
+    topic: str,
+    document_ids: list[int] | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict:
+    response = requests.post(
+        f"{API_BASE_URL}/generate/resources",
+        auth=auth,
+        json={
+            "teaching_context": teaching_context,
+            "topic": topic,
+            "document_ids": document_ids or [],
+            "provider": provider,
+            "model": model,
         },
         timeout=120,
     )

@@ -60,7 +60,9 @@ def generate(
     prompt_version: str,
     effort: str = "high",  # no Gemini equivalent — kept for interface parity with the Anthropic backend
     max_tokens: int = 8000,
+    model: str | None = None,
 ) -> GenerationResult:
+    resolved_model = model or MODEL_PRIMARY
     clean_content, pii_hits = scrub_pii(user_content)
 
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
@@ -72,12 +74,12 @@ def generate(
         "responseSchema": _strip_unsupported_keys(output_schema),
         "maxOutputTokens": max_tokens,
     }
-    if "lite" not in MODEL_PRIMARY:
+    if "lite" not in resolved_model:
         generation_config["thinkingConfig"] = {"thinkingBudget": 0}
 
     try:
         response = requests.post(
-            f"{_API_BASE}/{MODEL_PRIMARY}:generateContent",
+            f"{_API_BASE}/{resolved_model}:generateContent",
             headers={"Content-Type": "application/json", "X-goog-api-key": api_key},
             json={
                 "contents": [{"parts": [{"text": clean_content}]}],
@@ -110,7 +112,7 @@ def generate(
 
     return GenerationResult(
         output=json.loads(text),
-        model=body.get("modelVersion", MODEL_PRIMARY),
+        model=body.get("modelVersion", resolved_model),
         input_tokens=usage.get("promptTokenCount", 0),
         output_tokens=usage.get("candidatesTokenCount", 0),
         pii_detected=pii_hits,

@@ -21,6 +21,8 @@ class LessonPlanRequest(BaseModel):
     topic: str
     duration_minutes: int = 40
     document_ids: list[int] = []
+    provider: str | None = None
+    model: str | None = None
 
 
 class LessonPlanSection(BaseModel):
@@ -50,6 +52,8 @@ class QuizRequest(BaseModel):
     item_counts: dict[str, int] = {"mcq": 5}
     difficulty: str = "medium"
     document_ids: list[int] = []
+    provider: str | None = None
+    model: str | None = None
 
 
 class QuizQuestion(BaseModel):
@@ -66,3 +70,27 @@ class QuizQuestion(BaseModel):
 class QuizResponse(BaseModel):
     questions: list[QuizQuestion]
     uncovered_objective_ids: list[str]
+
+
+# --- Learning resources (further-reading links) ---
+
+
+class ResourcesRequest(BaseModel):
+    teaching_context: TeachingContext
+    topic: str
+    document_ids: list[int] = []
+    provider: str | None = None
+    model: str | None = None
+
+
+class Resource(BaseModel):
+    title: str
+    type: str
+    url: str
+    description: str
+    confidence: str
+
+
+class ResourcesResponse(BaseModel):
+    topic: str
+    resources: list[Resource]
