@@ -1,7 +1,10 @@
 """Minimal ingestion schema — deliberately smaller than HLD.md's full data
-model. Enough to make grounding real; tenant scoping, versioning, and audit
-logs are deferred until the review/approve workflow actually needs them
-(see KT.md §9-10)."""
+model. Enough to make grounding real; versioning and audit logs are deferred
+until the review/approve workflow actually needs them (see KT.md §9-10).
+
+Tenant scoping: each user is their own tenant (tenant_id == users.id) — the
+simplest onboarding model that still gives real data isolation between
+teachers. See ../auth.py."""
 
 from datetime import datetime, timezone
 
@@ -18,6 +21,7 @@ class SourceDocument(Base):
     __tablename__ = "source_documents"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     filename: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

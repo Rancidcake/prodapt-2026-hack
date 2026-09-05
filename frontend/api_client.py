@@ -4,10 +4,29 @@ import requests
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 
+Auth = tuple[str, str]
 
-def upload_document(filename: str, file_bytes: bytes) -> dict:
+
+def register(username: str, password: str) -> dict:
+    response = requests.post(
+        f"{API_BASE_URL}/auth/register",
+        json={"username": username, "password": password},
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def whoami(auth: Auth) -> dict:
+    response = requests.get(f"{API_BASE_URL}/auth/me", auth=auth, timeout=30)
+    response.raise_for_status()
+    return response.json()
+
+
+def upload_document(auth: Auth, filename: str, file_bytes: bytes) -> dict:
     response = requests.post(
         f"{API_BASE_URL}/documents",
+        auth=auth,
         files={"file": (filename, file_bytes, "application/pdf")},
         timeout=120,
     )
@@ -15,17 +34,22 @@ def upload_document(filename: str, file_bytes: bytes) -> dict:
     return response.json()
 
 
-def list_documents() -> list[dict]:
-    response = requests.get(f"{API_BASE_URL}/documents", timeout=30)
+def list_documents(auth: Auth) -> list[dict]:
+    response = requests.get(f"{API_BASE_URL}/documents", auth=auth, timeout=30)
     response.raise_for_status()
     return response.json()
 
 
 def generate_lesson_plan(
-    teaching_context: dict, topic: str, duration_minutes: int, document_ids: list[int] | None = None
+    auth: Auth,
+    teaching_context: dict,
+    topic: str,
+    duration_minutes: int,
+    document_ids: list[int] | None = None,
 ) -> dict:
     response = requests.post(
         f"{API_BASE_URL}/generate/lesson-plan",
+        auth=auth,
         json={
             "teaching_context": teaching_context,
             "topic": topic,
@@ -39,6 +63,7 @@ def generate_lesson_plan(
 
 
 def generate_quiz(
+    auth: Auth,
     teaching_context: dict,
     objectives: list[dict],
     item_counts: dict,
@@ -47,6 +72,7 @@ def generate_quiz(
 ) -> dict:
     response = requests.post(
         f"{API_BASE_URL}/generate/quiz",
+        auth=auth,
         json={
             "teaching_context": teaching_context,
             "objectives": objectives,

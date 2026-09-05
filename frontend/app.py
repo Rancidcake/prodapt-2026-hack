@@ -1,10 +1,74 @@
+import requests
 import streamlit as st
 
-from api_client import generate_lesson_plan, generate_quiz, list_documents, upload_document
+from api_client import (
+    generate_lesson_plan,
+    generate_quiz,
+    list_documents,
+    register,
+    upload_document,
+    whoami,
+)
 
 st.set_page_config(page_title="MyLesson.ai", page_icon="📘")
-st.title("MyLesson.ai")
-st.caption("An AI teaching assistant — draft, review, approve.")
+
+if "auth" not in st.session_state:
+    st.session_state.auth = None
+
+# --- Login / register gate ---
+
+if st.session_state.auth is None:
+    st.title("MyLesson.ai")
+    st.caption("Sign in to keep your uploaded material and generations private to you.")
+
+    login_tab, register_tab = st.tabs(["Log in", "Create account"])
+
+    with login_tab:
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            if st.form_submit_button("Log in"):
+                try:
+                    whoami((username, password))
+                    st.session_state.auth = (username, password)
+                    st.rerun()
+                except requests.HTTPError:
+                    st.error("Invalid username or password.")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Could not reach the backend: {exc}")
+
+    with register_tab:
+        with st.form("register_form"):
+            new_username = st.text_input("Choose a username")
+            new_password = st.text_input("Choose a password (min 8 characters)", type="password")
+            if st.form_submit_button("Create account"):
+                try:
+                    register(new_username, new_password)
+                    st.session_state.auth = (new_username, new_password)
+                    st.rerun()
+                except requests.HTTPError as exc:
+                    detail = exc.response.json().get("detail", str(exc)) if exc.response is not None else str(exc)
+                    st.error(f"Could not create account: {detail}")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Could not reach the backend: {exc}")
+
+    st.stop()
+
+auth = st.session_state.auth
+
+# --- Main app (authenticated) ---
+
+top_left, top_right = st.columns([5, 1])
+with top_left:
+    st.title("MyLesson.ai")
+    st.caption(f"Signed in as **{auth[0]}** — draft, review, approve.")
+with top_right:
+    if st.button("Log out"):
+        st.session_state.auth = None
+        st.session_state.pop("documents", None)
+        st.session_state.pop("lesson_plan", None)
+        st.session_state.pop("quiz", None)
+        st.rerun()
 
 if "lesson_plan" not in st.session_state:
     st.session_state.lesson_plan = None
@@ -12,7 +76,7 @@ if "quiz" not in st.session_state:
     st.session_state.quiz = None
 if "documents" not in st.session_state:
     try:
-        st.session_state.documents = list_documents()
+        st.session_state.documents = list_documents(auth)
     except Exception:  # noqa: BLE001 — backend may not be up yet on first paint
         st.session_state.documents = []
 
@@ -25,8 +89,8 @@ uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
 if uploaded_file is not None and st.button("Ingest document"):
     with st.spinner("Parsing, chunking, and embedding…"):
         try:
-            upload_document(uploaded_file.name, uploaded_file.getvalue())
-            st.session_state.documents = list_documents()
+            upload_document(auth, uploaded_file.name, uploaded_file.getvalue())
+            st.session_state.documents = list_documents(auth)
             st.success(f"Ingested {uploaded_file.name}")
         except Exception as exc:  # noqa: BLE001
             st.error(f"Upload failed: {exc}")
@@ -64,6 +128,7 @@ if submitted:
         with st.spinner("Generating lesson plan…"):
             try:
                 st.session_state.lesson_plan = generate_lesson_plan(
+                    auth,
                     teaching_context={
                         "grade": grade,
                         "subject": subject,
@@ -114,6 +179,7 @@ if plan:
         with st.spinner("Generating quiz…"):
             try:
                 st.session_state.quiz = generate_quiz(
+                    auth,
                     teaching_context={
                         "grade": grade,
                         "subject": subject,

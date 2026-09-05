@@ -4,6 +4,8 @@
 
 Built for the Prodapt Hackathon — Problem Statement, Group 2.
 
+> **This README describes the target design.** For what's actually built and running today — including a few places the build diverged from this doc (e.g. auth is HTTP Basic + bcrypt, not JWT, for now) — see `KT.md`.
+
 ---
 
 ## The problem
@@ -177,7 +179,7 @@ Named so that "you didn't build X" has an answer:
 | Document parsing | PyMuPDF (PDF), python-docx (DOCX) | Page and section references survive extraction, which citations depend on |
 | Export | ReportLab / python-docx | Font embedding controllable — required for Devanagari and other non-Latin scripts |
 | LLM | Provider-abstracted | Decision 9 — model ID recorded per generation, provider swappable by config |
-| Auth | JWT with tenant claim | Tenant scope enforced server-side on every query |
+| Auth | HTTP Basic + bcrypt (MVP) | Simplest path to real per-teacher data isolation — each account is its own tenant. Tenant scope enforced server-side, in the query itself, not just the endpoint. JWT is the planned upgrade once sessions/refresh matter. |
 
 *Rejected: React + Vite for the frontend.* It's the better choice for a polished, bespoke multi-page product, but it means maintaining two toolchains (Python backend, JS frontend) on a one-day clock. Streamlit gets a reviewable, working UI live fastest, at the cost of a more generic look — an acceptable trade for a hackathon demo, not necessarily for Phase 2.
 
